@@ -6,9 +6,9 @@ Example 1
 **Before**:
 ```python
 l1 = []
-for j in xrange(100000):
+for j in xrange(10000):
   l2 = []
-  for k in xrange(100000):
+  for k in xrange(1000):
     l2.append(k)
     l1.append(None)
   l1.append(l2)
@@ -17,10 +17,10 @@ for j in xrange(100000):
 ```python
 l1 = []
 __l1_append = l1.append
-for j in xrange(100000):
+for j in xrange(10000):
     l2 = []
     __l2_append = l2.append
-    for k in xrange(100000):
+    for k in xrange(1000):
         __l2_append(k)
         __l1_append(None)
     __l1_append(l2)
