@@ -4,6 +4,7 @@ import difflib
 
 import astor
 import astoptimizer
+import operator
 
 
 DEFAULT_ASTOPTIMIZER_CONFIG = astoptimizer.Config('builtin_funcs',)  # Might need to do away with builtin_funcs if we're writing back to file...
@@ -47,6 +48,8 @@ class ForTransformer(ast.NodeTransformer):
     def _target_names(target):
         if isinstance(target, ast.Name):
             return [target.id]
+        if isinstance(target, (ast.Attribute, ast.Subscript)):
+            return ForTransformer._target_names(target.value)
         return [
             name 
             for elt in target.elts 
@@ -54,18 +57,31 @@ class ForTransformer(ast.NodeTransformer):
         ]
 
     @staticmethod
+    def _get_body_locals(node):
+        assignments = set(
+            name
+            for subnode in node.body
+            if isinstance(subnode, ast.Assign)
+            for target in subnode.targets
+            for name in ForTransformer._target_names(target)
+        )
+        if isinstance(node, ast.With) and node.optional_vars:
+            assignments |= {node.optional_vars.id}
+        body_subnode_asignments = (
+            ForTransformer._get_body_locals(subnode) 
+            for subnode in node.body 
+            if hasattr(subnode, 'body') 
+            and not isinstance(subnode, ast.For)
+        )
+        return reduce(operator.or_, body_subnode_asignments, assignments)
+
+    @staticmethod
     def _get_for_locals(for_node):
         """
         Get the local-scope variables from for node.
         """
         target_vars = frozenset(ForTransformer._target_names(for_node.target))
-        assignments = frozenset(
-            name
-            for subnode in for_node.body
-            if isinstance(subnode, ast.Assign)
-            for target in subnode.targets
-            for name in ForTransformer._target_names(target)
-        )
+        assignments = ForTransformer._get_body_locals(for_node)
         return target_vars | assignments
 
     def visit_For(self, node):
@@ -101,6 +117,19 @@ class ForAttrTransformer(ast.NodeTransformer):
         if isinstance(node, ast.Name):
             return node.id
         return ForAttrTransformer._get_attr_varname(node.value) + '_' + node.attr
+
+    def visit_Assign(self, node):
+        return ast.Assign(
+            targets=node.targets,  # We may want to break out sections of deeply-nested attributes... actually, do visit on all but outermost layer.
+            value=self.visit(node.value)
+        )
+
+    def visit_AugAssign(self, node):
+        return ast.AugAssign(
+            target=node.target,  # see visit_Assign
+            op=node.op,
+            value=self.visit(node.value)
+        )
 
     def visit_Attribute(self, node):
         base_name = self._is_nested_attr(node)
